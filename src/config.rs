@@ -1,10 +1,23 @@
-#[derive(Debug, Clone)]
+use clap::Args;
+
+#[derive(Debug, Clone, Args)]
 pub struct RuntimeConfig {
+    #[arg(skip)]
     pub llm_api_base: String,
+
+    #[arg(long, env = "OPENAI_API_KEY")]
     pub openai_api_key: Option<String>,
+
+    #[arg(long, default_value = "0.0.0.0")]
     pub gateway_host: String,
+
+    #[arg(long, default_value_t = 9000)]
     pub gateway_port: u16,
+
+    #[arg(long, default_value_t = 600.0)]
     pub upstream_ready_timeout_s: f64,
+
+    #[arg(long, default_value_t = 2.0)]
     pub upstream_ready_interval_s: f64,
 }
 
