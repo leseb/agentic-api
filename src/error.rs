@@ -5,8 +5,8 @@ pub enum Error {
     #[error("failed to build HTTP client")]
     HttpClient(#[source] reqwest::Error),
 
-    #[error("upstream not ready within {timeout_s:.0}s at {url}")]
-    UpstreamTimeout { url: String, timeout_s: f64 },
+    #[error("vLLM not ready within {timeout_s:.0}s at {url}")]
+    VllmTimeout { url: String, timeout_s: f64 },
 
     #[error(transparent)]
     Io(#[from] io::Error),

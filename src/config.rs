@@ -15,10 +15,10 @@ pub struct RuntimeConfig {
     pub gateway_port: u16,
 
     #[arg(long, default_value_t = 600.0)]
-    pub upstream_ready_timeout_s: f64,
+    pub vllm_ready_timeout_s: f64,
 
     #[arg(long, default_value_t = 2.0)]
-    pub upstream_ready_interval_s: f64,
+    pub vllm_ready_interval_s: f64,
 }
 
 #[must_use]

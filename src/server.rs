@@ -8,12 +8,12 @@ use crate::config::RuntimeConfig;
 use crate::error::Error;
 use crate::proxy::ProxyState;
 
-/// Poll upstream `/health` until it responds 200 or the timeout is reached.
+/// Poll vLLM `/health` until it responds 200 or the timeout is reached.
 ///
 /// # Errors
 ///
-/// Returns an error if the upstream does not become ready within the configured timeout.
-pub async fn wait_upstream_ready(config: &RuntimeConfig) -> Result<(), Error> {
+/// Returns an error if vLLM does not become ready within the configured timeout.
+pub async fn wait_vllm_ready(config: &RuntimeConfig) -> Result<(), Error> {
     let base = config.llm_api_base.trim_end_matches('/');
     let url = format!("{base}/health");
 
@@ -34,17 +34,17 @@ pub async fn wait_upstream_ready(config: &RuntimeConfig) -> Result<(), Error> {
         .build()
         .map_err(Error::HttpClient)?;
 
-    let timeout = Duration::from_secs_f64(config.upstream_ready_timeout_s);
-    let interval = Duration::from_secs_f64(config.upstream_ready_interval_s);
+    let timeout = Duration::from_secs_f64(config.vllm_ready_timeout_s);
+    let interval = Duration::from_secs_f64(config.vllm_ready_interval_s);
     let start = tokio::time::Instant::now();
     let mut last_notice = Duration::ZERO;
 
     loop {
         let elapsed = start.elapsed();
         if elapsed > timeout {
-            return Err(Error::UpstreamTimeout {
+            return Err(Error::VllmTimeout {
                 url,
-                timeout_s: config.upstream_ready_timeout_s,
+                timeout_s: config.vllm_ready_timeout_s,
             });
         }
 
@@ -55,21 +55,21 @@ pub async fn wait_upstream_ready(config: &RuntimeConfig) -> Result<(), Error> {
 
         if elapsed.saturating_sub(last_notice) >= interval {
             last_notice = elapsed;
-            info!("waiting for upstream ({}s elapsed): {url}", elapsed.as_secs());
+            info!("waiting for vLLM ({}s elapsed): {url}", elapsed.as_secs());
         }
 
         tokio::time::sleep(interval).await;
     }
 }
 
-/// Start the gateway after the upstream becomes ready.
+/// Start the gateway after vLLM becomes ready.
 ///
 /// # Errors
 ///
-/// Returns an error if upstream readiness polling fails or the server cannot bind.
+/// Returns an error if vLLM readiness polling fails or the server cannot bind.
 pub async fn run(config: RuntimeConfig) -> Result<(), Error> {
-    wait_upstream_ready(&config).await?;
-    info!("upstream ready: {}", config.llm_api_base);
+    wait_vllm_ready(&config).await?;
+    info!("vLLM ready: {}", config.llm_api_base);
 
     let addr = format!("{}:{}", config.gateway_host, config.gateway_port);
     let state = ProxyState::new(config)?;

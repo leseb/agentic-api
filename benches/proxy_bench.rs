@@ -16,14 +16,14 @@ use agentic_api::app::build_router;
 use agentic_api::config::RuntimeConfig;
 use agentic_api::proxy::ProxyState;
 
-fn bench_config(upstream_url: &str) -> RuntimeConfig {
+fn bench_config(vllm_url: &str) -> RuntimeConfig {
     RuntimeConfig {
-        llm_api_base: upstream_url.to_owned(),
+        llm_api_base: vllm_url.to_owned(),
         openai_api_key: Some("bench-key".to_owned()),
         gateway_host: "127.0.0.1".to_owned(),
         gateway_port: 0,
-        upstream_ready_timeout_s: 5.0,
-        upstream_ready_interval_s: 0.1,
+        vllm_ready_timeout_s: 5.0,
+        vllm_ready_interval_s: 0.1,
     }
 }
 
@@ -58,7 +58,7 @@ async fn responses_handler(req: Request) -> Response {
     (StatusCode::OK, [("content-type", "application/json")], out).into_response()
 }
 
-async fn spawn_upstream() -> String {
+async fn spawn_vllm() -> String {
     let app = Router::new()
         .route("/health", get(health_handler))
         .route("/v1/responses", post(responses_handler));
@@ -88,11 +88,11 @@ async fn spawn_gateway(config: RuntimeConfig) -> String {
 fn proxy_benchmarks(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
 
-    let (upstream_url, gateway_url) = rt.block_on(async {
-        let upstream_url = spawn_upstream().await;
-        let config = bench_config(&upstream_url);
+    let (vllm_url, gateway_url) = rt.block_on(async {
+        let vllm_url = spawn_vllm().await;
+        let config = bench_config(&vllm_url);
         let gateway_url = spawn_gateway(config).await;
-        (upstream_url, gateway_url)
+        (vllm_url, gateway_url)
     });
 
     let client = reqwest::Client::new();
@@ -110,7 +110,7 @@ fn proxy_benchmarks(c: &mut Criterion) {
     let mut group = c.benchmark_group("non_stream");
 
     group.bench_function("direct", |b| {
-        let url = format!("{upstream_url}/v1/responses");
+        let url = format!("{vllm_url}/v1/responses");
         let body = non_stream_body.clone();
         b.to_async(&rt).iter(|| {
             let client = client.clone();
@@ -142,7 +142,7 @@ fn proxy_benchmarks(c: &mut Criterion) {
     let mut group = c.benchmark_group("stream");
 
     group.bench_function("direct", |b| {
-        let url = format!("{upstream_url}/v1/responses");
+        let url = format!("{vllm_url}/v1/responses");
         let body = stream_body.clone();
         b.to_async(&rt).iter(|| {
             let client = client.clone();

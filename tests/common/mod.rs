@@ -15,21 +15,21 @@ use tokio::net::TcpListener;
 use agentic_api::config::RuntimeConfig;
 use agentic_api::proxy::ProxyState;
 
-pub fn test_config(upstream_url: &str) -> RuntimeConfig {
+pub fn test_config(vllm_url: &str) -> RuntimeConfig {
     RuntimeConfig {
-        llm_api_base: upstream_url.to_owned(),
-        openai_api_key: Some("env-upstream-key".to_owned()),
+        llm_api_base: vllm_url.to_owned(),
+        openai_api_key: Some("env-vllm-key".to_owned()),
         gateway_host: "127.0.0.1".to_owned(),
         gateway_port: 0,
-        upstream_ready_timeout_s: 5.0,
-        upstream_ready_interval_s: 0.1,
+        vllm_ready_timeout_s: 5.0,
+        vllm_ready_interval_s: 0.1,
     }
 }
 
-pub fn test_config_no_key(upstream_url: &str) -> RuntimeConfig {
+pub fn test_config_no_key(vllm_url: &str) -> RuntimeConfig {
     RuntimeConfig {
         openai_api_key: None,
-        ..test_config(upstream_url)
+        ..test_config(vllm_url)
     }
 }
 
@@ -54,7 +54,7 @@ async fn responses_handler(req: Request) -> Response {
         let resp_body = serde_json::json!({"authorization": auth});
         return (
             StatusCode::OK,
-            [("content-type", "application/json"), ("x-upstream", "responses")],
+            [("content-type", "application/json"), ("x-vllm", "responses")],
             serde_json::to_string(&resp_body).unwrap(),
         )
             .into_response();
@@ -63,7 +63,7 @@ async fn responses_handler(req: Request) -> Response {
     if body.get("force_error").and_then(serde_json::Value::as_u64) == Some(429) {
         return (
             StatusCode::TOO_MANY_REQUESTS,
-            [("content-type", "application/json"), ("x-upstream", "error")],
+            [("content-type", "application/json"), ("x-vllm", "error")],
             r#"{"error":{"message":"rate limited","code":"rate_limit"}}"#,
         )
             .into_response();
@@ -81,7 +81,7 @@ async fn responses_handler(req: Request) -> Response {
             StatusCode::OK,
             [
                 ("content-type", "text/event-stream; charset=utf-8"),
-                ("x-upstream", "responses-stream"),
+                ("x-vllm", "responses-stream"),
             ],
             body,
         )
@@ -93,7 +93,7 @@ async fn responses_handler(req: Request) -> Response {
         StatusCode::OK,
         [
             ("content-type", "application/json"),
-            ("x-upstream", "responses"),
+            ("x-vllm", "responses"),
             ("connection", "keep-alive"),
         ],
         out,
@@ -101,7 +101,7 @@ async fn responses_handler(req: Request) -> Response {
         .into_response()
 }
 
-pub async fn spawn_upstream() -> (String, tokio::task::JoinHandle<()>) {
+pub async fn spawn_vllm() -> (String, tokio::task::JoinHandle<()>) {
     let app = Router::new()
         .route("/health", get(health_handler))
         .route("/v1/responses", post(responses_handler));
@@ -128,7 +128,7 @@ pub async fn spawn_gateway(config: RuntimeConfig) -> (String, SocketAddr, tokio:
     (format!("http://{addr}"), addr, handle)
 }
 
-pub async fn spawn_mid_stream_failure_upstream() -> (String, tokio::task::JoinHandle<()>) {
+pub async fn spawn_mid_stream_failure_vllm() -> (String, tokio::task::JoinHandle<()>) {
     async fn handler(_req: Request) -> Response {
         let (tx, rx) = tokio::sync::mpsc::channel::<Result<Bytes, std::io::Error>>(2);
         tokio::spawn(async move {
@@ -146,7 +146,7 @@ pub async fn spawn_mid_stream_failure_upstream() -> (String, tokio::task::JoinHa
             StatusCode::OK,
             [
                 ("content-type", "text/event-stream; charset=utf-8"),
-                ("x-upstream", "fake-stream"),
+                ("x-vllm", "fake-stream"),
             ],
             body,
         )
@@ -166,7 +166,7 @@ pub async fn spawn_mid_stream_failure_upstream() -> (String, tokio::task::JoinHa
     (format!("http://{addr}"), handle)
 }
 
-pub async fn spawn_timeout_upstream() -> (String, tokio::task::JoinHandle<()>) {
+pub async fn spawn_timeout_vllm() -> (String, tokio::task::JoinHandle<()>) {
     async fn handler(_req: Request) -> Response {
         tokio::time::sleep(Duration::from_secs(3600)).await;
         StatusCode::OK.into_response()

@@ -142,7 +142,7 @@ pub async fn proxy_responses(State(state): State<ProxyState>, req: axum::extract
         .and_then(|v| v.get("stream")?.as_bool())
         .unwrap_or(false);
 
-    let upstream_headers = filter_request_headers(&parts.headers, &state.config);
+    let vllm_headers = filter_request_headers(&parts.headers, &state.config);
 
     let base = state.config.llm_api_base.trim_end_matches('/');
     let mut url = format!("{base}/v1/responses");
@@ -157,29 +157,23 @@ pub async fn proxy_responses(State(state): State<ProxyState>, req: axum::extract
         &state.non_stream_client
     };
 
-    let upstream_resp = match client
-        .post(&url)
-        .headers(upstream_headers)
-        .body(body_bytes)
-        .send()
-        .await
-    {
+    let vllm_resp = match client.post(&url).headers(vllm_headers).body(body_bytes).send().await {
         Ok(r) => r,
         Err(e) if e.is_timeout() => {
-            return proxy_error(StatusCode::GATEWAY_TIMEOUT, "upstream_timeout", "Upstream timeout");
+            return proxy_error(StatusCode::GATEWAY_TIMEOUT, "vllm_timeout", "vLLM timeout");
         }
         Err(_) => {
-            return proxy_error(StatusCode::BAD_GATEWAY, "upstream_unavailable", "Upstream unavailable");
+            return proxy_error(StatusCode::BAD_GATEWAY, "vllm_unavailable", "vLLM unavailable");
         }
     };
 
-    let status = StatusCode::from_u16(upstream_resp.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
-    let mut response_headers = filter_response_headers(upstream_resp.headers());
+    let status = StatusCode::from_u16(vllm_resp.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
+    let mut response_headers = filter_response_headers(vllm_resp.headers());
 
-    if is_sse_content_type(upstream_resp.headers()) {
+    if is_sse_content_type(vllm_resp.headers()) {
         response_headers.insert("x-accel-buffering", http::HeaderValue::from_static("no"));
 
-        let byte_stream = upstream_resp.bytes_stream().map_err(std::io::Error::other);
+        let byte_stream = vllm_resp.bytes_stream().map_err(std::io::Error::other);
 
         let body = Body::from_stream(byte_stream);
         let mut resp = Response::new(body);
@@ -188,13 +182,13 @@ pub async fn proxy_responses(State(state): State<ProxyState>, req: axum::extract
         return resp;
     }
 
-    let payload: Bytes = match upstream_resp.bytes().await {
+    let payload: Bytes = match vllm_resp.bytes().await {
         Ok(b) => b,
         Err(_) => {
             return proxy_error(
                 StatusCode::BAD_GATEWAY,
-                "upstream_unavailable",
-                "Failed to read upstream response",
+                "vllm_unavailable",
+                "Failed to read vLLM response",
             );
         }
     };

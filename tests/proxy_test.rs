@@ -1,14 +1,14 @@
 mod common;
 
 use common::{
-    proxy_state_with_short_timeout, spawn_gateway, spawn_mid_stream_failure_upstream, spawn_timeout_upstream,
-    spawn_upstream, test_config, test_config_no_key,
+    proxy_state_with_short_timeout, spawn_gateway, spawn_mid_stream_failure_vllm, spawn_timeout_vllm, spawn_vllm,
+    test_config, test_config_no_key,
 };
 
 #[tokio::test]
 async fn test_non_stream_passthrough() {
-    let (upstream_url, _h1) = spawn_upstream().await;
-    let config = test_config(&upstream_url);
+    let (vllm_url, _h1) = spawn_vllm().await;
+    let config = test_config(&vllm_url);
     let (gw_url, _, _h2) = spawn_gateway(config).await;
 
     let client = reqwest::Client::new();
@@ -23,7 +23,7 @@ async fn test_non_stream_passthrough() {
         .unwrap();
 
     assert_eq!(resp.status(), 200);
-    assert_eq!(resp.headers().get("x-upstream").unwrap().to_str().unwrap(), "responses");
+    assert_eq!(resp.headers().get("x-vllm").unwrap().to_str().unwrap(), "responses");
     assert!(!resp.headers().contains_key("connection"));
 
     let body: serde_json::Value = resp.json().await.unwrap();
@@ -32,8 +32,8 @@ async fn test_non_stream_passthrough() {
 
 #[tokio::test]
 async fn test_stream_passthrough() {
-    let (upstream_url, _h1) = spawn_upstream().await;
-    let config = test_config(&upstream_url);
+    let (vllm_url, _h1) = spawn_vllm().await;
+    let config = test_config(&vllm_url);
     let (gw_url, _, _h2) = spawn_gateway(config).await;
 
     let client = reqwest::Client::new();
@@ -50,7 +50,7 @@ async fn test_stream_passthrough() {
 
     assert_eq!(resp.status(), 200);
     assert_eq!(
-        resp.headers().get("x-upstream").unwrap().to_str().unwrap(),
+        resp.headers().get("x-vllm").unwrap().to_str().unwrap(),
         "responses-stream"
     );
     assert_eq!(resp.headers().get("x-accel-buffering").unwrap().to_str().unwrap(), "no");
@@ -63,8 +63,8 @@ async fn test_stream_passthrough() {
 
 #[tokio::test]
 async fn test_hop_by_hop_headers_stripped() {
-    let (upstream_url, _h1) = spawn_upstream().await;
-    let config = test_config(&upstream_url);
+    let (vllm_url, _h1) = spawn_vllm().await;
+    let config = test_config(&vllm_url);
     let (gw_url, _, _h2) = spawn_gateway(config).await;
 
     let client = reqwest::Client::new();
@@ -77,14 +77,14 @@ async fn test_hop_by_hop_headers_stripped() {
         .unwrap();
 
     assert_eq!(resp.status(), 200);
-    assert_eq!(resp.headers().get("x-upstream").unwrap().to_str().unwrap(), "responses");
+    assert_eq!(resp.headers().get("x-vllm").unwrap().to_str().unwrap(), "responses");
     assert!(!resp.headers().contains_key("connection"));
 }
 
 #[tokio::test]
 async fn test_auth_injection() {
-    let (upstream_url, _h1) = spawn_upstream().await;
-    let config = test_config(&upstream_url);
+    let (vllm_url, _h1) = spawn_vllm().await;
+    let config = test_config(&vllm_url);
     let (gw_url, _, _h2) = spawn_gateway(config).await;
 
     let client = reqwest::Client::new();
@@ -97,13 +97,13 @@ async fn test_auth_injection() {
 
     assert_eq!(resp.status(), 200);
     let body: serde_json::Value = resp.json().await.unwrap();
-    assert_eq!(body["authorization"], "Bearer env-upstream-key");
+    assert_eq!(body["authorization"], "Bearer env-vllm-key");
 }
 
 #[tokio::test]
 async fn test_client_auth_precedence() {
-    let (upstream_url, _h1) = spawn_upstream().await;
-    let config = test_config(&upstream_url);
+    let (vllm_url, _h1) = spawn_vllm().await;
+    let config = test_config(&vllm_url);
     let (gw_url, _, _h2) = spawn_gateway(config).await;
 
     let client = reqwest::Client::new();
@@ -121,9 +121,9 @@ async fn test_client_auth_precedence() {
 }
 
 #[tokio::test]
-async fn test_upstream_http_error_passthrough() {
-    let (upstream_url, _h1) = spawn_upstream().await;
-    let config = test_config(&upstream_url);
+async fn test_vllm_http_error_passthrough() {
+    let (vllm_url, _h1) = spawn_vllm().await;
+    let config = test_config(&vllm_url);
     let (gw_url, _, _h2) = spawn_gateway(config).await;
 
     let client = reqwest::Client::new();
@@ -135,7 +135,7 @@ async fn test_upstream_http_error_passthrough() {
         .unwrap();
 
     assert_eq!(resp.status(), 429);
-    assert_eq!(resp.headers().get("x-upstream").unwrap().to_str().unwrap(), "error");
+    assert_eq!(resp.headers().get("x-vllm").unwrap().to_str().unwrap(), "error");
     let body: serde_json::Value = resp.json().await.unwrap();
     assert_eq!(body["error"]["message"], "rate limited");
     assert_eq!(body["error"]["code"], "rate_limit");
@@ -143,8 +143,8 @@ async fn test_upstream_http_error_passthrough() {
 
 #[tokio::test]
 async fn test_mid_stream_failure_closes_cleanly() {
-    let (upstream_url, _h1) = spawn_mid_stream_failure_upstream().await;
-    let config = test_config(&upstream_url);
+    let (vllm_url, _h1) = spawn_mid_stream_failure_vllm().await;
+    let config = test_config(&vllm_url);
     let (gw_url, _, _h2) = spawn_gateway(config).await;
 
     let client = reqwest::Client::new();
@@ -163,8 +163,8 @@ async fn test_mid_stream_failure_closes_cleanly() {
     let text = resp.text().await.unwrap_or_default();
     assert!(text.contains("response.output_text.delta"));
     assert!(!text.contains("data: [DONE]"));
-    assert!(!text.contains("upstream_timeout"));
-    assert!(!text.contains("upstream_unavailable"));
+    assert!(!text.contains("vllm_timeout"));
+    assert!(!text.contains("vllm_unavailable"));
 }
 
 #[tokio::test]
@@ -193,13 +193,13 @@ async fn test_connect_error_maps_to_502() {
 
     assert_eq!(resp.status(), 502);
     let body: serde_json::Value = resp.json().await.unwrap();
-    assert_eq!(body["error"]["code"], "upstream_unavailable");
+    assert_eq!(body["error"]["code"], "vllm_unavailable");
 }
 
 #[tokio::test]
 async fn test_timeout_maps_to_504() {
-    let (upstream_url, _h1) = spawn_timeout_upstream().await;
-    let config = test_config_no_key(&upstream_url);
+    let (vllm_url, _h1) = spawn_timeout_vllm().await;
+    let config = test_config_no_key(&vllm_url);
     let state = proxy_state_with_short_timeout(config);
 
     let router = agentic_api::app::build_router(state);
@@ -219,5 +219,5 @@ async fn test_timeout_maps_to_504() {
 
     assert_eq!(resp.status(), 504);
     let body: serde_json::Value = resp.json().await.unwrap();
-    assert_eq!(body["error"]["code"], "upstream_timeout");
+    assert_eq!(body["error"]["code"], "vllm_timeout");
 }
