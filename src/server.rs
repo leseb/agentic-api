@@ -14,7 +14,8 @@ fn checked_duration_seconds(name: &str, value: f64) -> Result<Duration, Error> {
             "{name} must be a finite number > 0 (got {value})"
         )));
     }
-    Ok(Duration::from_secs_f64(value))
+    Duration::try_from_secs_f64(value)
+        .map_err(|_| Error::Config(format!("{name} must be representable as a Duration (got {value})")))
 }
 
 /// Poll vLLM `/health` until it responds 200 or the timeout is reached.
@@ -124,7 +125,15 @@ pub async fn run_with_vllm(config: RuntimeConfig, vllm_args: Vec<String>) -> Res
         }
     }
 
-    let result = serve_gateway(config).await;
+    let result = tokio::select! {
+        gateway = serve_gateway(config) => gateway,
+        status = child.wait() => {
+            let status = status?;
+            Err(Error::VllmProcessExited {
+                status: status.to_string(),
+            })
+        }
+    };
 
     let _ = child.kill().await;
     let _ = child.wait().await;
@@ -144,6 +153,16 @@ mod tests {
     #[test]
     fn checked_duration_rejects_nan() {
         assert!(checked_duration_seconds("v", f64::NAN).is_err());
+    }
+
+    #[test]
+    fn checked_duration_rejects_infinite() {
+        assert!(checked_duration_seconds("v", f64::INFINITY).is_err());
+    }
+
+    #[test]
+    fn checked_duration_rejects_too_large_finite() {
+        assert!(checked_duration_seconds("v", 1e50).is_err());
     }
 
     #[test]
