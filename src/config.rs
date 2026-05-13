@@ -5,7 +5,7 @@ pub struct RuntimeConfig {
     #[arg(skip)]
     pub llm_api_base: String,
 
-    #[arg(long, env = "OPENAI_API_KEY")]
+    #[arg(long, env = "OPENAI_API_KEY", hide_env_values = true)]
     pub openai_api_key: Option<String>,
 
     #[arg(long, default_value = "0.0.0.0")]

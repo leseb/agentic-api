@@ -8,6 +8,15 @@ use crate::config::RuntimeConfig;
 use crate::error::Error;
 use crate::proxy::ProxyState;
 
+fn checked_duration_seconds(name: &str, value: f64) -> Result<Duration, Error> {
+    if !value.is_finite() || value <= 0.0 {
+        return Err(Error::Config(format!(
+            "{name} must be a finite number > 0 (got {value})"
+        )));
+    }
+    Ok(Duration::from_secs_f64(value))
+}
+
 /// Poll vLLM `/health` until it responds 200 or the timeout is reached.
 ///
 /// # Errors
@@ -34,8 +43,8 @@ pub async fn wait_vllm_ready(config: &RuntimeConfig) -> Result<(), Error> {
         .build()
         .map_err(Error::HttpClient)?;
 
-    let timeout = Duration::from_secs_f64(config.vllm_ready_timeout_s);
-    let interval = Duration::from_secs_f64(config.vllm_ready_interval_s);
+    let timeout = checked_duration_seconds("vllm_ready_timeout_s", config.vllm_ready_timeout_s)?;
+    let interval = checked_duration_seconds("vllm_ready_interval_s", config.vllm_ready_interval_s)?;
     let start = tokio::time::Instant::now();
     let mut last_notice = Duration::ZERO;
 
@@ -62,6 +71,16 @@ pub async fn wait_vllm_ready(config: &RuntimeConfig) -> Result<(), Error> {
     }
 }
 
+async fn serve_gateway(config: RuntimeConfig) -> Result<(), Error> {
+    let addr = format!("{}:{}", config.gateway_host, config.gateway_port);
+    let state = ProxyState::new(config)?;
+    let router = build_router(state);
+    let listener = TcpListener::bind(&addr).await?;
+    info!("gateway listening on {addr}");
+    axum::serve(listener, router).await?;
+    Ok(())
+}
+
 /// Start the gateway after vLLM becomes ready.
 ///
 /// # Errors
@@ -70,14 +89,7 @@ pub async fn wait_vllm_ready(config: &RuntimeConfig) -> Result<(), Error> {
 pub async fn run(config: RuntimeConfig) -> Result<(), Error> {
     wait_vllm_ready(&config).await?;
     info!("vLLM ready: {}", config.llm_api_base);
-
-    let addr = format!("{}:{}", config.gateway_host, config.gateway_port);
-    let state = ProxyState::new(config)?;
-    let router = build_router(state);
-    let listener = TcpListener::bind(&addr).await?;
-    info!("gateway listening on {addr}");
-    axum::serve(listener, router).await?;
-    Ok(())
+    serve_gateway(config).await
 }
 
 /// Spawn vLLM as a subprocess and run the gateway in the foreground.
@@ -93,9 +105,50 @@ pub async fn run_with_vllm(config: RuntimeConfig, vllm_args: Vec<String>) -> Res
     let mut child = cmd.spawn()?;
     info!("spawned vLLM subprocess (pid {})", child.id().unwrap_or(0));
 
-    let result = run(config).await;
+    let readiness_result = tokio::select! {
+        ready = wait_vllm_ready(&config) => ready,
+        status = child.wait() => {
+            let status = status?;
+            Err(Error::VllmProcessExited {
+                status: status.to_string(),
+            })
+        }
+    };
+
+    match readiness_result {
+        Ok(()) => info!("vLLM ready: {}", config.llm_api_base),
+        Err(err) => {
+            let _ = child.kill().await;
+            let _ = child.wait().await;
+            return Err(err);
+        }
+    }
+
+    let result = serve_gateway(config).await;
 
     let _ = child.kill().await;
     let _ = child.wait().await;
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::checked_duration_seconds;
+
+    #[test]
+    fn checked_duration_rejects_non_positive() {
+        assert!(checked_duration_seconds("v", 0.0).is_err());
+        assert!(checked_duration_seconds("v", -1.0).is_err());
+    }
+
+    #[test]
+    fn checked_duration_rejects_nan() {
+        assert!(checked_duration_seconds("v", f64::NAN).is_err());
+    }
+
+    #[test]
+    fn checked_duration_accepts_positive_finite() {
+        let duration = checked_duration_seconds("v", 0.25).unwrap();
+        assert_eq!(duration.as_millis(), 250);
+    }
 }

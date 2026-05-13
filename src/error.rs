@@ -8,6 +8,9 @@ pub enum Error {
     #[error("vLLM not ready within {timeout_s:.0}s at {url}")]
     VllmTimeout { url: String, timeout_s: f64 },
 
+    #[error("vLLM subprocess exited before becoming ready: {status}")]
+    VllmProcessExited { status: String },
+
     #[error(transparent)]
     Io(#[from] io::Error),
 
