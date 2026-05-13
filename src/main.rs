@@ -1,6 +1,7 @@
 use clap::{Parser, Subcommand};
 
 use agentic_api::config::{RuntimeConfig, normalize_base_url};
+use agentic_api::error::Error;
 use agentic_api::server;
 
 #[derive(Parser)]
@@ -37,7 +38,7 @@ enum Commands {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> Result<(), Error> {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -49,9 +50,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     match cli.command {
         None => {
-            let base = cli.llm_api_base.ok_or(
-                "standalone mode requires --llm-api-base; use `agentic-api serve <model>` for integrated mode",
-            )?;
+            let base = cli.llm_api_base.ok_or_else(|| {
+                Error::Config(
+                    "standalone mode requires --llm-api-base; use `agentic-api serve <model>` for integrated mode"
+                        .to_owned(),
+                )
+            })?;
             let mut config = cli.gateway;
             config.llm_api_base = normalize_base_url(&base);
             server::run(config).await

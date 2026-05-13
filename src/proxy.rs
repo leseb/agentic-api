@@ -10,6 +10,7 @@ use reqwest::Client;
 use serde_json::Value;
 
 use crate::config::RuntimeConfig;
+use crate::error::Error;
 
 const HOP_BY_HOP: &[&str] = &[
     "connection",
@@ -42,30 +43,29 @@ pub struct ProxyState {
 }
 
 impl ProxyState {
-    /// # Panics
+    /// # Errors
     ///
-    /// Panics if the HTTP clients cannot be built (invalid TLS backend).
-    #[must_use]
-    pub fn new(config: RuntimeConfig) -> Self {
+    /// Returns an error if the HTTP clients cannot be built (e.g. invalid TLS backend).
+    pub fn new(config: RuntimeConfig) -> Result<Self, Error> {
         let stream_client = Client::builder()
             .connect_timeout(Duration::from_secs(10))
             .pool_max_idle_per_host(0)
             .redirect(reqwest::redirect::Policy::none())
             .build()
-            .expect("failed to build stream HTTP client");
+            .map_err(Error::HttpClient)?;
 
         let non_stream_client = Client::builder()
             .connect_timeout(Duration::from_secs(10))
             .read_timeout(Duration::from_secs(300))
             .redirect(reqwest::redirect::Policy::none())
             .build()
-            .expect("failed to build non-stream HTTP client");
+            .map_err(Error::HttpClient)?;
 
-        Self {
+        Ok(Self {
             config,
             stream_client,
             non_stream_client,
-        }
+        })
     }
 }
 

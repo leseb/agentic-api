@@ -116,7 +116,7 @@ pub async fn spawn_upstream() -> (String, tokio::task::JoinHandle<()>) {
 }
 
 pub async fn spawn_gateway(config: RuntimeConfig) -> (String, SocketAddr, tokio::task::JoinHandle<()>) {
-    let state = ProxyState::new(config);
+    let state = ProxyState::new(config).unwrap();
     let router = agentic_api::app::build_router(state);
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
